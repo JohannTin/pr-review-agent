@@ -151,7 +151,7 @@ Verdict: ✗ REQUEST_CHANGES   (1 reflection iteration)
 
 ╭─── Review Summary ───────────────────────────────────────────────╮
 │ Missing error handling in the auth handler and a timing attack   │
-│ risk in middleware.                                               │
+│ risk in middleware.                                              │
 ╰──────────────────────────────────────────────────────────────────╯
 
 Review posted to GitHub.
