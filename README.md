@@ -48,7 +48,7 @@ CLI (main.py)
         └── RAG via ChromaDB + local embeddings (rag.py)
 ```
 
-**LLM backends:** The agent tries Claude API first (`claude-opus-4-8`). If the API is unavailable or out of credits, it falls back automatically to a local Ollama model (`qwen2.5-coder:7b`). You can also force either backend with `--llm`.
+**LLM backends:** The agent tries Claude API first (`claude-opus-4-8`). If the API is unavailable or out of credits, it falls back automatically to a local Ollama model (`qwen3.5:9b`). You can also force either backend with `--llm`.
 
 **RAG chunking:** Python files are chunked at AST boundaries (function/class level); other files use a fixed sliding window. This keeps retrieved context tight and relevant rather than returning entire files.
 
@@ -72,7 +72,7 @@ cp .env.example .env
 #   ANTHROPIC_API_KEY=sk-ant-...   ← required for Claude (primary LLM)
 
 # Optional: set up Ollama as a fallback
-ollama pull qwen2.5-coder:7b
+ollama pull qwen3.5:9b
 ollama serve
 ```
 

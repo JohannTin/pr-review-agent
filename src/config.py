@@ -11,7 +11,7 @@ GITHUB_TOKEN: str = os.environ["GITHUB_TOKEN"]
 CLAUDE_MODEL: str = "claude-opus-4-8"  # valid — verified via client.models.list() on 2026-06-16
 
 # --- Local LLM (Ollama fallback) ---
-LLM_MODEL: str = "qwen2.5-coder:7b"
+LLM_MODEL: str = "qwen3.5:9b"
 
 # --- ChromaDB ---
 CHROMA_DIR: Path = Path(__file__).parent.parent / ".chroma"
