@@ -184,14 +184,55 @@ async def index_context_node(state: PRReviewState, config: RunnableConfig) -> di
 
 def retrieve_context_node(state: PRReviewState) -> dict:
     """Semantic search over ChromaDB using the current context query."""
-    query = state.get("context_query") or (
-        "code context for: " + ", ".join(d["filename"] for d in state["diffs"])
-    )
-    new_chunks = rag.retrieve_context(query)
+    diff_text = "\n".join(d["patch"] for d in state["diffs"])
+    # Embed the actual diff content, not just filenames, so retrieval has real
+    # signal to match against (a filename alone rarely shares vocabulary with
+    # the code that uses a changed constant/function/exception elsewhere).
+    query = state.get("context_query") or diff_text
+    new_chunks = rag.retrieve_context(query, boost_text=diff_text)
     existing = state.get("context_chunks", [])
     # accumulate unique chunks across reflection iterations
     combined = existing + [c for c in new_chunks if c not in existing]
     return {"context_chunks": combined}
+
+
+def build_review_system_prompt(ignore_entries: str = "") -> str:
+    return f"""You are a senior software engineer performing a thorough code review.
+
+For each changed file, list only the most important issues (max 3 per file, one short sentence each).
+Prefix every issue with one of these labels:
+- [critical] — security vulnerabilities, data loss, crashes
+- [issue] — bugs, wrong logic, missing error handling
+- [note] — style, naming, minor suggestions (non-blocking)
+
+Pay special attention to whether a function signature, parameter, constant, or exception type
+changed in the diff is still referenced elsewhere in the Repository Context below in a way that's
+now inconsistent (a caller passing a removed parameter, a shared constant used with the old unit
+or meaning, an except clause that no longer matches the type raised, code assuming a validation
+check that was removed). These cross-file breaks are easy to miss and should be labeled [critical]
+or [issue], not passed over in favor of generic style feedback.
+
+summary: 1-2 sentences max. State the verdict reason and the single most important issue.
+
+verdict:
+- APPROVE: no [critical] or [issue] labels found
+- REQUEST_CHANGES: any [critical] or [issue] label present
+- COMMENT: only [note] labels, no blocking problems
+
+Set needs_more_context=true ONLY if seeing specific related code would meaningfully change your verdict.
+On the final iteration always set needs_more_context=false.
+
+You MUST respond with valid JSON matching this exact structure:
+{{
+  "file_reviews": [
+    {{"path": "filename.py", "issues": ["issue 1", "issue 2"]}}
+  ],
+  "verdict": "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+  "summary": "one or two sentence summary",
+  "needs_more_context": false,
+  "context_query": ""
+}}
+{ignore_entries}"""
 
 
 async def analyze_diff_node(state: PRReviewState, config: RunnableConfig) -> dict:
@@ -215,35 +256,7 @@ async def analyze_diff_node(state: PRReviewState, config: RunnableConfig) -> dic
             ignore_entries = "\n\nThe following have been explicitly verified — do not flag them:\n" + \
                              "\n".join(f"- {l}" for l in lines)
 
-    system = SystemMessage(content=f"""You are a senior software engineer performing a thorough code review.
-
-For each changed file, list only the most important issues (max 3 per file, one short sentence each).
-Prefix every issue with one of these labels:
-- [critical] — security vulnerabilities, data loss, crashes
-- [issue] — bugs, wrong logic, missing error handling
-- [note] — style, naming, minor suggestions (non-blocking)
-
-summary: 1-2 sentences max. State the verdict reason and the single most important issue.
-
-verdict:
-- APPROVE: no [critical] or [issue] labels found
-- REQUEST_CHANGES: any [critical] or [issue] label present
-- COMMENT: only [note] labels, no blocking problems
-
-Set needs_more_context=true ONLY if seeing specific related code would meaningfully change your verdict.
-On the final iteration always set needs_more_context=false.
-
-You MUST respond with valid JSON matching this exact structure:
-{{
-  "file_reviews": [
-    {{"path": "filename.py", "issues": ["issue 1", "issue 2"]}}
-  ],
-  "verdict": "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
-  "summary": "one or two sentence summary",
-  "needs_more_context": false,
-  "context_query": ""
-}}
-{ignore_entries}""")
+    system = SystemMessage(content=build_review_system_prompt(ignore_entries))
 
     human = HumanMessage(content=f"""**PR Description:**
 {state['pr_description'] or '(no description provided)'}

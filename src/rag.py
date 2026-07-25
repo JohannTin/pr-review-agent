@@ -6,10 +6,18 @@ All other code files fall back to a fixed 60-line sliding window.
 """
 
 import ast
+import re
 import chromadb
 from sentence_transformers import SentenceTransformer
 
 from .config import CHROMA_DIR, CHROMA_COLLECTION, TOP_K_CHUNKS
+
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
+_COMMON_KEYWORDS = {
+    "self", "def", "return", "import", "from", "class", "None", "True", "False",
+    "raise", "except", "try", "while", "else", "elif", "with", "yield", "async",
+    "await", "lambda", "global", "nonlocal", "assert", "break", "continue", "pass",
+}
 
 _model: SentenceTransformer | None = None
 
@@ -104,8 +112,21 @@ def index_files(files: list) -> int:
     return len(all_chunks)
 
 
-def retrieve_context(query: str, top_k: int = TOP_K_CHUNKS) -> list[str]:
-    """Return the top-k most semantically similar code chunks for the query."""
+def _extract_identifiers(text: str) -> set[str]:
+    """Pull out likely names (functions, constants, exceptions) from diff text."""
+    return {tok for tok in _IDENTIFIER_RE.findall(text) if tok not in _COMMON_KEYWORDS}
+
+
+def retrieve_context(query: str, top_k: int = TOP_K_CHUNKS, boost_text: str = "") -> list[str]:
+    """
+    Return the top-k most semantically similar code chunks for the query.
+
+    If boost_text is given (typically the diff), any chunk containing an exact
+    identifier from boost_text is force-included even if it didn't rank in the
+    top-k. This catches the case a pure similarity search misses: a renamed or
+    removed constant/function/exception whose *usage* elsewhere doesn't read as
+    semantically similar to the diff, but shares the exact identifier.
+    """
     collection = _get_collection()
     model = _get_model()
 
@@ -122,9 +143,22 @@ def retrieve_context(query: str, top_k: int = TOP_K_CHUNKS) -> list[str]:
     results = collection.query(query_embeddings=embedding, n_results=n)
 
     chunks = []
-    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+    seen_ids = set()
+    for doc, meta, cid in zip(results["documents"][0], results["metadatas"][0], results["ids"][0]):
         header = f"# {meta['path']} — {meta['name']} (line {meta['line']})"
         chunks.append(f"{header}\n{doc}")
+        seen_ids.add(cid)
+
+    identifiers = _extract_identifiers(boost_text) if boost_text else set()
+    if identifiers:
+        all_docs = collection.get()
+        for doc, meta, cid in zip(all_docs["documents"], all_docs["metadatas"], all_docs["ids"]):
+            if cid in seen_ids or not any(ident in doc for ident in identifiers):
+                continue
+            header = f"# {meta['path']} — {meta['name']} (line {meta['line']})"
+            chunks.append(f"{header}\n{doc}")
+            seen_ids.add(cid)
+
     return chunks
 
 

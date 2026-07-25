@@ -26,6 +26,9 @@ dependencies = [
     "pydantic>=2.0.0",
 ]
 
+[project.optional-dependencies]
+eval = ["tiktoken>=0.7.0"]
+
 [project.scripts]
 pr-review = "src.main:app"
 
